@@ -69,8 +69,6 @@ if __name__ == "__main__":
     n_clusters = 10000
     
     ckpt = {}
-    import pdb
-    pdb.set_trace()
     for spk in os.listdir(dataset):
         if args.spk is None or spk == args.spk:
             if os.path.isdir(dataset/spk):
