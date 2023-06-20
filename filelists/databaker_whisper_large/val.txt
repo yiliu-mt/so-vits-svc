@@ -1,0 +1,2 @@
+dataset/44k/databaker_whisper_large/SSB3000/003011.wav
+dataset/44k/databaker_whisper_large/SSB3000/001735.wav

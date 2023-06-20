@@ -368,10 +368,15 @@ class SynthesizerTrn(nn.Module):
             "upsample_kernel_sizes": upsample_kernel_sizes,
             "gin_channels": gin_channels,
         }
-        
-        
-        if vocoder_name == "nsf-hifigan":
+
+        if "decoder" in kwargs:
+            vocoder_name = kwargs['decoder']
+
+        if vocoder_name == "nsf-hifigan" or vocoder_name == "nsf_decoder":
             from vdecoder.hifigan.models import Generator
+            self.dec = Generator(h=hps)
+        elif vocoder_name == "vits_decoder":
+            from vdecoder.hifigan.vits_models import Generator
             self.dec = Generator(h=hps)
         elif vocoder_name == "nsf-snake-hifigan":
             from vdecoder.hifiganwithsnake.models import Generator
@@ -393,6 +398,7 @@ class SynthesizerTrn(nn.Module):
             p_dropout,
             spk_channels=gin_channels
         )
+        # TODO (yi.liu): Do we need it in speech conversion
         self.emb_uv = nn.Embedding(2, hidden_channels)
         self.character_mix = False
 
