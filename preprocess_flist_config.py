@@ -99,6 +99,12 @@ if __name__ == "__main__":
     elif args.speech_encoder == "whisper-ppg-large":
         config_template["model"]["ssl_dim"] = config_template["model"]["filter_channels"] = config_template["model"]["gin_channels"] = 1280
         d_config_template["data"]["encoder_out_channels"] = 1280
+    elif args.speech_encoder == "conformer-ppg":
+        config_template["model"]["ssl_dim"] = config_template["model"]["filter_channels"] = config_template["model"]["gin_channels"] = 256
+        d_config_template["data"]["encoder_out_channels"] = 256
+    elif args.speech_encoder == "conformer-ppg-large":
+        config_template["model"]["ssl_dim"] = config_template["model"]["filter_channels"] = config_template["model"]["gin_channels"] = 512
+        d_config_template["data"]["encoder_out_channels"] = 512
         
     if args.vol_aug:
         config_template["train"]["vol_aug"] = config_template["model"]["vol_embedding"] = True
