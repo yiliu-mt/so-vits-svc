@@ -30,6 +30,10 @@ if __name__ == "__main__":
     parser.add_argument("--speech_decoder", type=str, choices=["vits-hifigan", "nsf-hifigan"], default="nsf-hifigan", help="The vocoder used in vits")
     parser.add_argument("--vol_aug", action="store_true", help="Whether to use volume embedding and volume augmentation")
     parser.add_argument("--output_dir", type=str, default="./filelists", help="path to configs dir")
+    parser.add_argument("--ppg_aug", action="store_true", help="Whether to use PPG perturbation")
+    parser.add_argument("--vae_aug", action="store_true", help="Whether to use VAE perturbation")
+    parser.add_argument("--bidirectional_flow", action="store_true", help="Whether to use bi-directional prior/posterior")
+    parser.add_argument("--speaker_grl", action="store_true", help="Whether to use speaker gradient reversal layer")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -105,6 +109,11 @@ if __name__ == "__main__":
         
     if args.vol_aug:
         config_template["train"]["vol_aug"] = config_template["model"]["vol_embedding"] = True
+    
+    config_template["train"]["ppg_aug"] = args.ppg_aug
+    config_template["train"]["vae_aug"] = args.vae_aug
+    config_template["train"]["speaker_grl"] = args.speaker_grl
+    config_template["model"]["bidirectional_flow"] = args.bidirectional_flow
 
     print(f"Writing {args.output_dir}/config.json")
     with open(f"{args.output_dir}/config.json", "w") as f:
