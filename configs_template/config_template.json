@@ -23,7 +23,7 @@
     "port": "8001",
     "keep_ckpts": 10,
     "all_in_mem": false,
-    "vol_aug":false
+    "vol_aug": false
   },
   "data": {
     "training_files": "filelists/train.txt",
@@ -59,7 +59,12 @@
     "speech_encoder":"vec768l12",
     "speaker_embedding":false,
     "vol_embedding":false,
-    "vocoder_name":"nsf-hifigan"
+    "vocoder_name":"nsf-hifigan",
+    "bidirectional_flow": false,
+    "use_f0": true,
+    "speaker_grl": false,
+    "ppg_std": 0,
+    "vae_std": 0
   },
   "spk": {
     "nyaru": 0,

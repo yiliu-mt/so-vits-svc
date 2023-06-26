@@ -102,7 +102,7 @@ class Generator(torch.nn.Module):
         self.cond = nn.Conv1d(h['gin_channels'], h['upsample_initial_channel'], 1)
 
     def forward(self, x, f0, g=None):
-        x = x + self.f0_emb(f0_to_coarse(f0)).transpose(1, 2)
+        x = x + (self.f0_emb(f0_to_coarse(f0)).transpose(1, 2) if f0 is not None else 0)
         x = self.conv_pre(x)
         x = x + self.cond(g)
 

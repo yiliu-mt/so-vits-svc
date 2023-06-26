@@ -49,7 +49,6 @@ def kl_loss(z_p, logs_q, m_p, logs_p, total_logdet, z_mask):
   m_p, logs_p: [b, h, t_t]
   total_logdet: [b] - total_logdet summed over each batch
   """
-  # test
   z_p = z_p.float()
   logs_q = logs_q.float()
   m_p = m_p.float()
