@@ -144,6 +144,12 @@ def run(rank, n_gpus, hps):
         scheduler_d.step()
 
 
+def update_adversarial_weight(hps, iteration):
+    weight_iter = iteration * hps.train.adv_warmup_steps ** -1.5 * hps.model.speaker_grl_weight / hps.train.adv_warmup_steps ** -0.5
+    weight = min(hps.model.speaker_grl_weight, weight_iter)
+    return weight
+
+
 def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loaders, logger, writers):
     net_g, net_d = nets
     optim_g, optim_d = optims
@@ -154,7 +160,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
 
     # train_loader.batch_sampler.set_epoch(epoch)
     global global_step
-    spkc_criterion = nn.CosineEmbeddingLoss()
+    CrossEntropy = nn.CrossEntropyLoss().cuda(rank)
 
     net_g.train()
     net_d.train()
@@ -211,10 +217,11 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
             y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = net_d(y, y_hat)
             with autocast(enabled=False):
                 # speaker loss
-                loss_spk = spkc_criterion(g, spk_preds, torch.Tensor(spk_preds.size(0))
-                                .cuda(rank, non_blocking=True).fill_(1.0)) if spk_preds is not None else 0
-                # scaling factor
-                loss_spk *= 2
+                if spk_preds is not None:
+                    loss_spk = CrossEntropy(spk_preds, g.squeeze(1))
+                    loss_spk *= update_adversarial_weight(hps, global_step)
+                else:
+                    loss_spk = 0
 
                 # kl loss
                 loss_kl = kl_loss(z_f, logs_q, m_p, logs_p, logdet_f, z_mask) * hps.train.c_kl
@@ -242,6 +249,8 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
             if global_step % hps.train.log_interval == 0:
                 lr = optim_g.param_groups[0]['lr']
                 losses = [loss_disc, loss_gen, loss_fm, loss_mel, loss_kl]
+                if spk_preds is not None:
+                    losses.append(loss_spk)
                 reference_loss=0
                 for i in losses:
                     reference_loss += i
@@ -254,6 +263,8 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                                "grad_norm_d": grad_norm_d, "grad_norm_g": grad_norm_g}
                 scalar_dict.update({"loss/g/fm": loss_fm, "loss/g/mel": loss_mel, "loss/g/kl": loss_kl,
                                     "loss/g/lf0": loss_lf0})
+                if spk_preds is not None:
+                    scalar_dict.update({"loss/g/spk_preds": loss_spk})
 
                 # scalar_dict.update({"loss/g/{}".format(i): v for i, v in enumerate(losses_gen)})
                 # scalar_dict.update({"loss/d_r/{}".format(i): v for i, v in enumerate(losses_disc_r)})
