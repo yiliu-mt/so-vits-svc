@@ -249,6 +249,8 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
             if global_step % hps.train.log_interval == 0:
                 lr = optim_g.param_groups[0]['lr']
                 losses = [loss_disc, loss_gen, loss_fm, loss_mel, loss_kl]
+                if spk_preds is not None:
+                    losses.append(loss_spk)
                 reference_loss=0
                 for i in losses:
                     reference_loss += i
@@ -261,6 +263,8 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                                "grad_norm_d": grad_norm_d, "grad_norm_g": grad_norm_g}
                 scalar_dict.update({"loss/g/fm": loss_fm, "loss/g/mel": loss_mel, "loss/g/kl": loss_kl,
                                     "loss/g/lf0": loss_lf0})
+                if spk_preds is not None:
+                    scalar_dict.update({"loss/g/spk_preds": loss_spk})
 
                 # scalar_dict.update({"loss/g/{}".format(i): v for i, v in enumerate(losses_gen)})
                 # scalar_dict.update({"loss/d_r/{}".format(i): v for i, v in enumerate(losses_disc_r)})
