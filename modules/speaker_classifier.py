@@ -39,17 +39,34 @@ class GradientReversal(torch.nn.Module):
         return GradientReversalFunction.apply(x, self.lambda_)
 
 
+class LinearNorm(nn.Module):
+    ''' Linear Norm Module:
+        - Linear Layer
+    '''
+    def __init__(self, in_dim, out_dim, bias=True, w_init_gain='linear'):
+        super(LinearNorm, self).__init__()
+        self.linear_layer = nn.Linear(in_dim, out_dim, bias=bias)
+        nn.init.xavier_uniform_(self.linear_layer.weight, gain=nn.init.calculate_gain(w_init_gain))
+
+    def forward(self, x):
+        ''' Forward function of Linear Norm
+            x = (*, in_dim)
+        '''
+        x = self.linear_layer(x)  # (*, out_dim)
+        return x
+
+
 class SpeakerClassifier(nn.Module):
 
-    def __init__(self, embed_dim, spk_dim):
+    def __init__(self, embed_dim, nb_speakers):
         super(SpeakerClassifier, self).__init__()
         self.classifier = nn.Sequential(
             GradientReversal(lambda_reversal=1),
-            weight_norm(nn.Conv1d(embed_dim, embed_dim, kernel_size=5, padding=2)),
+            LinearNorm(embed_dim, embed_dim, w_init_gain='relu'),
             nn.ReLU(),
-            weight_norm(nn.Conv1d(embed_dim, embed_dim, kernel_size=5, padding=2)),
+            LinearNorm(embed_dim, embed_dim, w_init_gain='relu'),
             nn.ReLU(),
-            weight_norm(nn.Conv1d(embed_dim, spk_dim, kernel_size=5, padding=2))
+            LinearNorm(embed_dim, nb_speakers, w_init_gain='linear')
         )
 
     def forward(self, x):
@@ -58,5 +75,4 @@ class SpeakerClassifier(nn.Module):
         '''
         # pass through classifier
         outputs = self.classifier(x)  # (B, nb_speakers)
-        outputs = torch.mean(outputs, dim=-1)
         return outputs

@@ -327,7 +327,7 @@ class SynthesizerTrn(nn.Module):
                  vol_embedding=False,
                  vocoder_name="nsf-hifigan",
                  bidirectional_flow=False,
-                 speaker_grl=False,
+                 speaker_grl_weight=0,
                  use_f0=True,
                  ppg_std=0,
                  vae_std=0,
@@ -356,7 +356,7 @@ class SynthesizerTrn(nn.Module):
         self.use_f0 = use_f0
         self.ppg_std = ppg_std
         self.vae_std = vae_std
-        self.speaker_grl = speaker_grl
+        self.speaker_grl_weight = speaker_grl_weight
 
         self.emb_g = nn.Embedding(n_speakers, gin_channels)
         self.pre = nn.Conv1d(ssl_dim, hidden_channels, kernel_size=5, padding=2)
@@ -422,7 +422,7 @@ class SynthesizerTrn(nn.Module):
 
         self.character_mix = False
 
-        if self.speaker_grl:
+        if self.speaker_grl_weight > 0:
             self.speaker_classifier = SpeakerClassifier(
                 hidden_channels,
                 n_speakers
@@ -460,7 +460,11 @@ class SynthesizerTrn(nn.Module):
             x, x_mask, f0=(f0_to_coarse(f0) if self.use_f0 else None))
 
         # speaker discriminator
-        spk_preds = self.speaker_classifier(text_info) if self.speaker_grl else None
+        if self.speaker_grl_weight > 0:
+            text_emb = torch.sum(text_info, dim=-1) / c_lengths.unsqueeze(1)
+            spk_preds = self.speaker_classifier(text_emb)
+        else:
+            spk_preds = None
 
         z_q, m_q, logs_q, spec_mask = self.enc_q(spec, spec_lengths, g=g)
         z_slice, pitch_slice, ids_slice = commons.rand_slice_segments_with_pitch(z_q, f0, spec_lengths, self.segment_size)
