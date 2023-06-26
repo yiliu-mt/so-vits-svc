@@ -28,10 +28,14 @@ if __name__ == "__main__":
     parser.add_argument("--source_dir", type=str, default="./dataset/44k", help="path to source dir")
     parser.add_argument("--speech_encoder", type=str, default="vec768l12", help="choice a speech encoder|'vec768l12','vec256l9','hubertsoft','whisper-ppg','cnhubertlarge','dphubert','whisper-ppg-large'")
     parser.add_argument("--speech_decoder", type=str, choices=["vits-hifigan", "nsf-hifigan"], default="nsf-hifigan", help="The vocoder used in vits")
-    parser.add_argument("--vol_aug", action="store_true", help="Whether to use volume embedding and volume augmentation")
     parser.add_argument("--output_dir", type=str, default="./filelists", help="path to configs dir")
+    parser.add_argument("--vol_aug", default=False, type=lambda x: (str(x).lower() == 'true'), help="Whether to use volume embedding and volume augmentation")
+    parser.add_argument("--use_f0", default=True, type=lambda x: (str(x).lower() == 'true'), help="Whether to use F0 in the model")
+    parser.add_argument("--bidirectional_flow", default=False, type=lambda x: (str(x).lower() == 'true'), help="Whether to use bi-directional prior/posterior flow")
+    parser.add_argument("--speaker_grl", default=False, type=lambda x: (str(x).lower() == 'true'), help="Whether to use speaker gradient reversal layer")
+    parser.add_argument("--ppg_std", default=0, type=float, help="The stddev of PPG perturbation. Disabled when 0")
+    parser.add_argument("--vae_std", default=0, type=float, help="The stddev of latent variable perturbation in VAE. Disabled when 0")
     args = parser.parse_args()
-
     os.makedirs(args.output_dir, exist_ok=True)
     
     d_config_template = du.load_config(f"{args.configs_template}/diffusion_template.yaml")
@@ -111,6 +115,12 @@ if __name__ == "__main__":
         
     if args.vol_aug:
         config_template["train"]["vol_aug"] = config_template["model"]["vol_embedding"] = True
+    
+    config_template["model"]["bidirectional_flow"] = args.bidirectional_flow
+    config_template["model"]["use_f0"] = args.use_f0
+    config_template["model"]["speaker_grl"] = args.speaker_grl
+    config_template["model"]["ppg_std"] = args.ppg_std
+    config_template["model"]["vae_std"] = args.vae_std
 
     print(f"Writing {args.output_dir}/config.json")
     with open(f"{args.output_dir}/config.json", "w") as f:
