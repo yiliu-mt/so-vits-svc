@@ -343,6 +343,7 @@ class SynthesizerTrn(nn.Module):
         self.ssl_dim = ssl_dim
         self.vol_embedding = vol_embedding
         self.emb_g = nn.Embedding(n_speakers, gin_channels)
+        # self.emb_c = nn.Embedding(1, gin_channels)  # for hubert + km
         if vol_embedding:
            self.emb_vol = nn.Linear(1, hidden_channels)
 
@@ -411,6 +412,7 @@ class SynthesizerTrn(nn.Module):
 
     def forward(self, c, f0, uv, spec, g=None, c_lengths=None, spec_lengths=None, vol = None):
         g = self.emb_g(g).transpose(1,2)
+        # c = self.emb_c(c).transpose(1,2)
 
         # vol proj
         vol = self.emb_vol(vol[:,:,None]).transpose(1,2) if vol!=None and self.vol_embedding else 0
