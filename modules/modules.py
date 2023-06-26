@@ -268,12 +268,15 @@ class Log(nn.Module):
 
 class Flip(nn.Module):
   def forward(self, x, *args, reverse=False, **kwargs):
-    x = torch.flip(x, [1])
-    if not reverse:
+    # x = torch.flip(x, [1])
+    # if not reverse:
+    #   logdet = torch.zeros(x.size(0)).to(dtype=x.dtype, device=x.device)
+    #   return x, logdet
+    # else:
+    #   return x
+      x = torch.flip(x, [1])
       logdet = torch.zeros(x.size(0)).to(dtype=x.dtype, device=x.device)
       return x, logdet
-    else:
-      return x
 
 
 class ElementwiseAffine(nn.Module):
@@ -334,9 +337,10 @@ class ResidualCouplingLayer(nn.Module):
     if not reverse:
       x1 = m + x1 * torch.exp(logs) * x_mask
       x = torch.cat([x0, x1], 1)
-      logdet = torch.sum(logs, [1,2])
+      logdet = torch.sum(logs * x_mask, [1, 2])
       return x, logdet
     else:
       x1 = (x1 - m) * torch.exp(-logs) * x_mask
       x = torch.cat([x0, x1], 1)
-      return x
+      logdet = torch.sum(logs * x_mask, [1, 2])
+      return x, logdet

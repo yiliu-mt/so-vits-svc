@@ -28,12 +28,19 @@ if __name__ == "__main__":
     parser.add_argument("--source_dir", type=str, default="./dataset/44k", help="path to source dir")
     parser.add_argument("--speech_encoder", type=str, default="vec768l12", help="choice a speech encoder|'vec768l12','vec256l9','hubertsoft','whisper-ppg','cnhubertlarge','dphubert','whisper-ppg-large'")
     parser.add_argument("--speech_decoder", type=str, choices=["vits-hifigan", "nsf-hifigan"], default="nsf-hifigan", help="The vocoder used in vits")
-    parser.add_argument("--vol_aug", action="store_true", help="Whether to use volume embedding and volume augmentation")
     parser.add_argument("--output_dir", type=str, default="./filelists", help="path to configs dir")
+    parser.add_argument("--vol_aug", default=False, type=lambda x: (str(x).lower() == 'true'), help="Whether to use volume embedding and volume augmentation")
+    parser.add_argument("--use_f0", default=True, type=lambda x: (str(x).lower() == 'true'), help="Whether to use F0 in the model")
+    parser.add_argument("--bidirectional_flow", default=False, type=lambda x: (str(x).lower() == 'true'), help="Whether to use bi-directional prior/posterior flow")
+    parser.add_argument("--speaker_grl", default=False, type=lambda x: (str(x).lower() == 'true'), help="Whether to use speaker gradient reversal layer")
+    parser.add_argument("--ppg_std", default=0, type=float, help="The stddev of PPG perturbation. Disabled when 0")
+    parser.add_argument("--vae_std", default=0, type=float, help="The stddev of latent variable perturbation in VAE. Disabled when 0")
     args = parser.parse_args()
-
     os.makedirs(args.output_dir, exist_ok=True)
     
+    d_config_template = du.load_config(f"{args.configs_template}/diffusion_template.yaml")
+    config_template = json.load(open(f"{args.configs_template}/config_template.json"))
+
     train = []
     val = []
     idx = 0
@@ -49,7 +56,9 @@ if __name__ == "__main__":
                 continue
             if not pattern.match(file):
                 print(f"warning：文件名{file}中包含非字母数字下划线，可能会导致错误。（也可能不会）")
-            if get_wav_duration(file) < 0.3:
+
+            if get_wav_duration(file) < (
+                config_template['train']['segment_size'] / config_template['data']['sampling_rate'] + 0.05):
                 print("skip too short audio:", file)
                 continue
             new_wavs.append(file)
@@ -74,12 +83,10 @@ if __name__ == "__main__":
             f.write(wavpath + "\n")
 
 
-    d_config_template = du.load_config(f"{args.configs_template}/diffusion_template.yaml")
     d_config_template["model"]["n_spk"] = spk_id
     d_config_template["data"]["encoder"] = args.speech_encoder
     d_config_template["spk"] = spk_dict
     
-    config_template = json.load(open(f"{args.configs_template}/config_template.json"))
     config_template["spk"] = spk_dict
     config_template["model"]["n_speakers"] = spk_id
     config_template["model"]["speech_encoder"] = args.speech_encoder
@@ -99,9 +106,21 @@ if __name__ == "__main__":
     elif args.speech_encoder == "whisper-ppg-large":
         config_template["model"]["ssl_dim"] = config_template["model"]["filter_channels"] = config_template["model"]["gin_channels"] = 1280
         d_config_template["data"]["encoder_out_channels"] = 1280
+    elif args.speech_encoder == "conformer-ppg":
+        config_template["model"]["ssl_dim"] = config_template["model"]["filter_channels"] = config_template["model"]["gin_channels"] = 256
+        d_config_template["data"]["encoder_out_channels"] = 256
+    elif args.speech_encoder == "conformer-ppg-large":
+        config_template["model"]["ssl_dim"] = config_template["model"]["filter_channels"] = config_template["model"]["gin_channels"] = 512
+        d_config_template["data"]["encoder_out_channels"] = 512
         
     if args.vol_aug:
         config_template["train"]["vol_aug"] = config_template["model"]["vol_embedding"] = True
+    
+    config_template["model"]["bidirectional_flow"] = args.bidirectional_flow
+    config_template["model"]["use_f0"] = args.use_f0
+    config_template["model"]["speaker_grl"] = args.speaker_grl
+    config_template["model"]["ppg_std"] = args.ppg_std
+    config_template["model"]["vae_std"] = args.vae_std
 
     print(f"Writing {args.output_dir}/config.json")
     with open(f"{args.output_dir}/config.json", "w") as f:
