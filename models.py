@@ -96,7 +96,8 @@ class TextEncoder(nn.Module):
                  gin_channels=0,
                  filter_channels=None,
                  n_heads=None,
-                 p_dropout=None):
+                 p_dropout=None,
+                 use_f0=True):
         super().__init__()
         self.out_channels = out_channels
         self.hidden_channels = hidden_channels
@@ -104,7 +105,8 @@ class TextEncoder(nn.Module):
         self.n_layers = n_layers
         self.gin_channels = gin_channels
         self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
-        self.f0_emb = nn.Embedding(256, hidden_channels)
+        if use_f0:
+            self.f0_emb = nn.Embedding(256, hidden_channels)
 
         self.enc_ = attentions.Encoder(
             hidden_channels,
@@ -355,8 +357,6 @@ class SynthesizerTrn(nn.Module):
         self.ppg_std = ppg_std
         self.vae_std = vae_std
         self.speaker_grl = speaker_grl
-        if vol_embedding:
-           self.emb_vol = nn.Linear(1, hidden_channels)
 
         self.emb_g = nn.Embedding(n_speakers, gin_channels)
         self.pre = nn.Conv1d(ssl_dim, hidden_channels, kernel_size=5, padding=2)
@@ -368,7 +368,8 @@ class SynthesizerTrn(nn.Module):
             n_heads=n_heads,
             n_layers=n_layers,
             kernel_size=kernel_size,
-            p_dropout=p_dropout
+            p_dropout=p_dropout,
+            use_f0=use_f0,
         )
         hps = {
             "sampling_rate": sampling_rate,
@@ -380,6 +381,7 @@ class SynthesizerTrn(nn.Module):
             "upsample_initial_channel": upsample_initial_channel,
             "upsample_kernel_sizes": upsample_kernel_sizes,
             "gin_channels": gin_channels,
+            "use_f0": use_f0,
         }
 
         if "decoder" in kwargs:
@@ -401,18 +403,23 @@ class SynthesizerTrn(nn.Module):
 
         self.enc_q = Encoder(spec_channels, inter_channels, hidden_channels, 5, 1, 16, gin_channels=gin_channels)
         self.flow = ResidualCouplingBlock(inter_channels, hidden_channels, 5, 1, 4, gin_channels=gin_channels)
-        self.f0_decoder = F0Decoder(
-            1,
-            hidden_channels,
-            filter_channels,
-            n_heads,
-            n_layers,
-            kernel_size,
-            p_dropout,
-            spk_channels=gin_channels
-        )
-        # TODO (yi.liu): Do we need it in speech conversion
-        self.emb_uv = nn.Embedding(2, hidden_channels)
+        if self.use_f0:
+            self.f0_decoder = F0Decoder(
+                1,
+                hidden_channels,
+                filter_channels,
+                n_heads,
+                n_layers,
+                kernel_size,
+                p_dropout,
+                spk_channels=gin_channels
+            )
+            # TODO (yi.liu): Do we need it in speech conversion
+            self.emb_uv = nn.Embedding(2, hidden_channels)
+
+        if vol_embedding:
+           self.emb_vol = nn.Linear(1, hidden_channels)
+
         self.character_mix = False
 
         if self.speaker_grl:
