@@ -73,6 +73,8 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
         uv = torch.FloatTensor(np.array(uv,dtype=float))
 
         c = torch.load(filename+ ".soft.pt")
+        if len(c.shape) == 2:
+            c = c.transpose(0, 1)[None, :, :]
         c = utils.repeat_expand_2d(c.squeeze(0), f0.shape[0])
         if self.vol_emb:
             volume_path = filename + ".vol.npy"

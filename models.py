@@ -359,7 +359,13 @@ class SynthesizerTrn(nn.Module):
         self.speaker_grl_weight = speaker_grl_weight
 
         self.emb_g = nn.Embedding(n_speakers, gin_channels)
-        self.pre = nn.Conv1d(ssl_dim, hidden_channels, kernel_size=5, padding=2)
+        if self.ssl_dim == 1:
+            # The input content feature is index
+            # we assume that the content index is less than 1000
+            self.emb_c = nn.Embedding(1000, filter_channels)
+            self.pre = nn.Conv1d(filter_channels, hidden_channels, kernel_size=5, padding=2)
+        else:
+            self.pre = nn.Conv1d(ssl_dim, hidden_channels, kernel_size=5, padding=2)
 
         self.enc_p = TextEncoder(
             inter_channels,
@@ -436,9 +442,13 @@ class SynthesizerTrn(nn.Module):
         self.character_mix = True
 
     def forward(self, c, f0, uv, spec, g=None, c_lengths=None, spec_lengths=None, vol = None):
+        if self.ssl_dim == 1:
+            # embedding if the content feature is index
+            c = self.emb_c(c.long()).squeeze(1).transpose(1,2)
 
         c = c + (torch.randn_like(c) * self.ppg_std if self.ppg_std > 0 else 0)
         g = self.emb_g(g).transpose(1,2)
+
 
         # vol proj
         vol = self.emb_vol(vol[:,:,None]).transpose(1,2) if vol!=None and self.vol_embedding else 0
@@ -493,6 +503,10 @@ class SynthesizerTrn(nn.Module):
             torch.cuda.manual_seed_all(seed)
         else:
             torch.manual_seed(seed)
+
+        if self.ssl_dim == 1:
+            # embedding if the content feature is index
+            c = self.emb_c(c.long()).squeeze(1).transpose(1,2)
 
         c_lengths = (torch.ones(c.size(0)) * c.size(-1)).to(c.device)
 
