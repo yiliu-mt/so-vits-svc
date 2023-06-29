@@ -487,7 +487,7 @@ class SynthesizerTrn(nn.Module):
 
         return o, ids_slice, spec_mask, (z_f, z_r, z_p, m_p, logs_p, z_q, m_q, logs_q, logdet_f, logdet_r), pred_lf0, norm_lf0, lf0, spk_preds
 
-    def infer(self, c, f0, uv, g=None, noice_scale=0.35, seed=52468, predict_f0=False, vol = None):
+    def infer(self, c, f0, uv, g=None, noice_scale=0.35, seed=52468, predict_f0=False, vol = None, f0_tran=0):
 
         if c.device == torch.device("cuda"):
             torch.cuda.manual_seed_all(seed)
@@ -512,11 +512,28 @@ class SynthesizerTrn(nn.Module):
            
         x = self.pre(c) * x_mask + (self.emb_uv(uv.long()).transpose(1,2) if self.use_f0 else 0) + vol
         
-        if predict_f0:
+        if self.use_f0 and predict_f0:
+
+            uv_sum = torch.sum(uv, dim=1, keepdim=True)
+            uv_sum[uv_sum == 0] = 9999
+            print("before")
+            print(torch.sum(f0 * uv, dim=1, keepdim=True) / uv_sum)
+            print(torch.sqrt(torch.sum((f0 * uv) ** 2, dim=1, keepdim=True) / uv_sum - (torch.sum(f0 * uv, dim=1, keepdim=True) / uv_sum) ** 2))
+
             lf0 = 2595. * torch.log10(1. + f0.unsqueeze(1) / 700.) / 500
             norm_lf0 = utils.normalize_f0(lf0, x_mask, uv, random_scale=False)
             pred_lf0 = self.f0_decoder(x, norm_lf0, x_mask, spk_emb=g)
             f0 = (700 * (torch.pow(10, pred_lf0 * 500 / 2595) - 1)).squeeze(1)
+            
+            print("after")
+            print(torch.sum(f0 * uv, dim=1, keepdim=True) / uv_sum)
+            print(torch.sqrt(torch.sum((f0 * uv) ** 2, dim=1, keepdim=True) / uv_sum - (torch.sum(f0 * uv, dim=1, keepdim=True) / uv_sum) ** 2))
+
+            # f0 transform
+            f0 = f0 * 2 ** (f0_tran / 12)
+            print("transform")
+            print(torch.sum(f0 * uv, dim=1, keepdim=True) / uv_sum)
+            print(torch.sqrt(torch.sum((f0 * uv) ** 2, dim=1, keepdim=True) / uv_sum - (torch.sum(f0 * uv, dim=1, keepdim=True) / uv_sum) ** 2))
         
         z_p, m_p, logs_p, c_mask, _ = self.enc_p(
             x,
