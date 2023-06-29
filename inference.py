@@ -137,7 +137,12 @@ def main():
                 "loudness_envelope_adjustment":loudness_envelope_adjustment
             }
             audio = svc_model.slice_inference(**kwarg)
-            key = "auto" if auto_predict_f0 else f"{tran}key"
+            if auto_predict_f0 and tran != 0:
+                key = f"auto_{tran}key"
+            elif auto_predict_f0 and tran == 0:
+                key = "auto"
+            else:
+                key = f"{tran}key"
             cluster_name = "" if cluster_infer_ratio == 0 else f"_{cluster_infer_ratio}"
             isdiffusion = "sovits"
             if shallow_diffusion : isdiffusion = "sovdiff"
