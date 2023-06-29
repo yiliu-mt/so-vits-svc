@@ -80,7 +80,8 @@ class Generator(torch.nn.Module):
         self.num_kernels = len(h["resblock_kernel_sizes"])
         self.num_upsamples = len(h["upsample_rates"])
 
-        self.f0_emb = nn.Embedding(256, h["inter_channels"])
+        if self.h["use_f0"]:
+            self.f0_emb = nn.Embedding(256, h["inter_channels"])
         self.conv_pre = weight_norm(Conv1d(h["inter_channels"], h["upsample_initial_channel"], 7, 1, padding=3))
         resblock = ResBlock1 if h["resblock"] == '1' else ResBlock2
 
@@ -102,7 +103,7 @@ class Generator(torch.nn.Module):
         self.cond = nn.Conv1d(h['gin_channels'], h['upsample_initial_channel'], 1)
 
     def forward(self, x, f0, g=None):
-        x = x + self.f0_emb(f0_to_coarse(f0)).transpose(1, 2)
+        x = x + (self.f0_emb(f0_to_coarse(f0)).transpose(1, 2) if f0 is not None else 0)
         x = self.conv_pre(x)
         x = x + self.cond(g)
 

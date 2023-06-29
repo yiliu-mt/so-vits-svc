@@ -13,6 +13,7 @@ from torch.nn.utils import weight_norm, remove_weight_norm, spectral_norm
 
 import utils
 from modules.commons import init_weights, get_padding
+from modules.speaker_classifier import SpeakerClassifier
 from utils import f0_to_coarse
 
 class ResidualCouplingBlock(nn.Module):
@@ -41,13 +42,16 @@ class ResidualCouplingBlock(nn.Module):
             self.flows.append(modules.Flip())
 
     def forward(self, x, x_mask, g=None, reverse=False):
+        total_logdet = 0
         if not reverse:
             for flow in self.flows:
-                x, _ = flow(x, x_mask, g=g, reverse=reverse)
+                x, logdet = flow(x, x_mask, g=g, reverse=reverse)
+                total_logdet += logdet
         else:
             for flow in reversed(self.flows):
-                x = flow(x, x_mask, g=g, reverse=reverse)
-        return x
+                x, logdet = flow(x, x_mask, g=g, reverse=reverse)
+                total_logdet += logdet
+        return x, total_logdet
 
 
 class Encoder(nn.Module):
@@ -92,7 +96,8 @@ class TextEncoder(nn.Module):
                  gin_channels=0,
                  filter_channels=None,
                  n_heads=None,
-                 p_dropout=None):
+                 p_dropout=None,
+                 use_f0=True):
         super().__init__()
         self.out_channels = out_channels
         self.hidden_channels = hidden_channels
@@ -100,7 +105,8 @@ class TextEncoder(nn.Module):
         self.n_layers = n_layers
         self.gin_channels = gin_channels
         self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
-        self.f0_emb = nn.Embedding(256, hidden_channels)
+        if use_f0:
+            self.f0_emb = nn.Embedding(256, hidden_channels)
 
         self.enc_ = attentions.Encoder(
             hidden_channels,
@@ -111,13 +117,12 @@ class TextEncoder(nn.Module):
             p_dropout)
 
     def forward(self, x, x_mask, f0=None, noice_scale=1):
-        x = x + self.f0_emb(f0).transpose(1, 2)
+        x = x + (self.f0_emb(f0).transpose(1, 2) if f0 is not None else 0)
         x = self.enc_(x * x_mask, x_mask)
         stats = self.proj(x) * x_mask
         m, logs = torch.split(stats, self.out_channels, dim=1)
         z = (m + torch.randn_like(m) * torch.exp(logs) * noice_scale) * x_mask
-
-        return z, m, logs, x_mask
+        return z, m, logs, x_mask, x
 
 
 class DiscriminatorP(torch.nn.Module):
@@ -320,7 +325,12 @@ class SynthesizerTrn(nn.Module):
                  n_speakers,
                  sampling_rate=44100,
                  vol_embedding=False,
-                 vocoder_name = "nsf-hifigan",
+                 vocoder_name="nsf-hifigan",
+                 bidirectional_flow=False,
+                 speaker_grl_weight=0,
+                 use_f0=True,
+                 ppg_std=0,
+                 vae_std=0,
                  **kwargs):
 
         super().__init__()
@@ -342,12 +352,20 @@ class SynthesizerTrn(nn.Module):
         self.gin_channels = gin_channels
         self.ssl_dim = ssl_dim
         self.vol_embedding = vol_embedding
-        self.emb_g = nn.Embedding(n_speakers, gin_channels)
-        # self.emb_c = nn.Embedding(1, gin_channels)  # for hubert + km
-        if vol_embedding:
-           self.emb_vol = nn.Linear(1, hidden_channels)
+        self.bidirectional_flow = bidirectional_flow
+        self.use_f0 = use_f0
+        self.ppg_std = ppg_std
+        self.vae_std = vae_std
+        self.speaker_grl_weight = speaker_grl_weight
 
-        self.pre = nn.Conv1d(ssl_dim, hidden_channels, kernel_size=5, padding=2)
+        self.emb_g = nn.Embedding(n_speakers, gin_channels)
+        if self.ssl_dim == 1:
+            # The input content feature is index
+            # we assume that the content index is less than 1000
+            self.emb_c = nn.Embedding(1000, filter_channels)
+            self.pre = nn.Conv1d(filter_channels, hidden_channels, kernel_size=5, padding=2)
+        else:
+            self.pre = nn.Conv1d(ssl_dim, hidden_channels, kernel_size=5, padding=2)
 
         self.enc_p = TextEncoder(
             inter_channels,
@@ -356,7 +374,8 @@ class SynthesizerTrn(nn.Module):
             n_heads=n_heads,
             n_layers=n_layers,
             kernel_size=kernel_size,
-            p_dropout=p_dropout
+            p_dropout=p_dropout,
+            use_f0=use_f0,
         )
         hps = {
             "sampling_rate": sampling_rate,
@@ -368,6 +387,7 @@ class SynthesizerTrn(nn.Module):
             "upsample_initial_channel": upsample_initial_channel,
             "upsample_kernel_sizes": upsample_kernel_sizes,
             "gin_channels": gin_channels,
+            "use_f0": use_f0,
         }
 
         if "decoder" in kwargs:
@@ -376,7 +396,7 @@ class SynthesizerTrn(nn.Module):
         if vocoder_name == "nsf-hifigan" or vocoder_name == "nsf_decoder":
             from vdecoder.hifigan.models import Generator
             self.dec = Generator(h=hps)
-        elif vocoder_name == "vits_decoder":
+        elif vocoder_name == "vits-hifigan" or vocoder_name == "vits_decoder":
             from vdecoder.hifigan.vits_models import Generator
             self.dec = Generator(h=hps)
         elif vocoder_name == "nsf-snake-hifigan":
@@ -389,19 +409,30 @@ class SynthesizerTrn(nn.Module):
 
         self.enc_q = Encoder(spec_channels, inter_channels, hidden_channels, 5, 1, 16, gin_channels=gin_channels)
         self.flow = ResidualCouplingBlock(inter_channels, hidden_channels, 5, 1, 4, gin_channels=gin_channels)
-        self.f0_decoder = F0Decoder(
-            1,
-            hidden_channels,
-            filter_channels,
-            n_heads,
-            n_layers,
-            kernel_size,
-            p_dropout,
-            spk_channels=gin_channels
-        )
-        # TODO (yi.liu): Do we need it in speech conversion
-        self.emb_uv = nn.Embedding(2, hidden_channels)
+        if self.use_f0:
+            self.f0_decoder = F0Decoder(
+                1,
+                hidden_channels,
+                filter_channels,
+                n_heads,
+                n_layers,
+                kernel_size,
+                p_dropout,
+                spk_channels=gin_channels
+            )
+            # TODO (yi.liu): Do we need it in speech conversion
+            self.emb_uv = nn.Embedding(2, hidden_channels)
+
+        if vol_embedding:
+           self.emb_vol = nn.Linear(1, hidden_channels)
+
         self.character_mix = False
+
+        if self.speaker_grl_weight > 0:
+            self.speaker_classifier = SpeakerClassifier(
+                hidden_channels,
+                n_speakers
+            )
 
     def EnableCharacterMix(self, n_speakers_map, device):
         self.speaker_map = torch.zeros((n_speakers_map, 1, 1, self.gin_channels)).to(device)
@@ -411,40 +442,71 @@ class SynthesizerTrn(nn.Module):
         self.character_mix = True
 
     def forward(self, c, f0, uv, spec, g=None, c_lengths=None, spec_lengths=None, vol = None):
+        if self.ssl_dim == 1:
+            # embedding if the content feature is index
+            c = self.emb_c(c.long()).squeeze(1).transpose(1,2)
+
+        c = c + (torch.randn_like(c) * self.ppg_std if self.ppg_std > 0 else 0)
         g = self.emb_g(g).transpose(1,2)
-        # c = self.emb_c(c).transpose(1,2)
+
 
         # vol proj
         vol = self.emb_vol(vol[:,:,None]).transpose(1,2) if vol!=None and self.vol_embedding else 0
 
         # ssl prenet
         x_mask = torch.unsqueeze(commons.sequence_mask(c_lengths, c.size(2)), 1).to(c.dtype)
-        x = self.pre(c) * x_mask + self.emb_uv(uv.long()).transpose(1,2) + vol
+        x = self.pre(c) * x_mask + (self.emb_uv(uv.long()).transpose(1,2) if self.use_f0 else 0) + vol
 
         # f0 predict
-        lf0 = 2595. * torch.log10(1. + f0.unsqueeze(1) / 700.) / 500
-        norm_lf0 = utils.normalize_f0(lf0, x_mask, uv)
-        pred_lf0 = self.f0_decoder(x, norm_lf0, x_mask, spk_emb=g)
+        if self.use_f0:
+            lf0 = 2595. * torch.log10(1. + f0.unsqueeze(1) / 700.) / 500
+            norm_lf0 = utils.normalize_f0(lf0, x_mask, uv)
+            pred_lf0 = self.f0_decoder(x, norm_lf0, x_mask, spk_emb=g)
+        else:
+            lf0, norm_lf0, pred_lf0 = None, None, None
 
         # encoder
-        z_ptemp, m_p, logs_p, _ = self.enc_p(x, x_mask, f0=f0_to_coarse(f0))
-        z, m_q, logs_q, spec_mask = self.enc_q(spec, spec_lengths, g=g)
+        z_p, m_p, logs_p, _, text_info = self.enc_p(
+            x, x_mask, f0=(f0_to_coarse(f0) if self.use_f0 else None))
+
+        # speaker discriminator
+        if self.speaker_grl_weight > 0:
+            text_emb = torch.sum(text_info, dim=-1) / c_lengths.unsqueeze(1)
+            spk_preds = self.speaker_classifier(text_emb)
+        else:
+            spk_preds = None
+
+        z_q, m_q, logs_q, spec_mask = self.enc_q(spec, spec_lengths, g=g)
+        z_slice, pitch_slice, ids_slice = commons.rand_slice_segments_with_pitch(z_q, f0, spec_lengths, self.segment_size)
+        # nsf decoder
+        o = self.dec(
+            z_slice + (torch.randn_like(z_slice) * self.vae_std if self.vae_std > 0 else 0),
+            g=g,
+            f0=(pitch_slice if self.use_f0 else None)
+        )
 
         # flow
-        z_p = self.flow(z, spec_mask, g=g)
-        z_slice, pitch_slice, ids_slice = commons.rand_slice_segments_with_pitch(z, f0, spec_lengths, self.segment_size)
+        # forward flow
+        z_f, logdet_f = self.flow(z_q, spec_mask, g=g)
 
-        # nsf decoder
-        o = self.dec(z_slice, g=g, f0=pitch_slice)
+        if self.bidirectional_flow:
+            # backward flow
+            z_r, logdet_r = self.flow(z_p, spec_mask, g=g, reverse=True)
+        else:
+            z_r, logdet_r = None, None
 
-        return o, ids_slice, spec_mask, (z, z_p, m_p, logs_p, m_q, logs_q), pred_lf0, norm_lf0, lf0
+        return o, ids_slice, spec_mask, (z_f, z_r, z_p, m_p, logs_p, z_q, m_q, logs_q, logdet_f, logdet_r), pred_lf0, norm_lf0, lf0, spk_preds
 
-    def infer(self, c, f0, uv, g=None, noice_scale=0.35, seed=52468, predict_f0=False, vol = None):
+    def infer(self, c, f0, uv, g=None, noice_scale=0.35, seed=52468, predict_f0=False, vol = None, f0_tran=0):
 
         if c.device == torch.device("cuda"):
             torch.cuda.manual_seed_all(seed)
         else:
             torch.manual_seed(seed)
+
+        if self.ssl_dim == 1:
+            # embedding if the content feature is index
+            c = self.emb_c(c.long()).squeeze(1).transpose(1,2)
 
         c_lengths = (torch.ones(c.size(0)) * c.size(-1)).to(c.device)
 
@@ -462,16 +524,37 @@ class SynthesizerTrn(nn.Module):
         # vol proj
         vol = self.emb_vol(vol[:,:,None]).transpose(1,2) if vol!=None and self.vol_embedding else 0
            
-        x = self.pre(c) * x_mask + self.emb_uv(uv.long()).transpose(1,2) + vol
+        x = self.pre(c) * x_mask + (self.emb_uv(uv.long()).transpose(1,2) if self.use_f0 else 0) + vol
         
-        if predict_f0:
+        if self.use_f0 and predict_f0:
+
+            uv_sum = torch.sum(uv, dim=1, keepdim=True)
+            uv_sum[uv_sum == 0] = 9999
+            print("before")
+            print(torch.sum(f0 * uv, dim=1, keepdim=True) / uv_sum)
+            print(torch.sqrt(torch.sum((f0 * uv) ** 2, dim=1, keepdim=True) / uv_sum - (torch.sum(f0 * uv, dim=1, keepdim=True) / uv_sum) ** 2))
+
             lf0 = 2595. * torch.log10(1. + f0.unsqueeze(1) / 700.) / 500
             norm_lf0 = utils.normalize_f0(lf0, x_mask, uv, random_scale=False)
             pred_lf0 = self.f0_decoder(x, norm_lf0, x_mask, spk_emb=g)
             f0 = (700 * (torch.pow(10, pred_lf0 * 500 / 2595) - 1)).squeeze(1)
-        
-        z_p, m_p, logs_p, c_mask = self.enc_p(x, x_mask, f0=f0_to_coarse(f0), noice_scale=noice_scale)
-        z = self.flow(z_p, c_mask, g=g, reverse=True)
-        o = self.dec(z * c_mask, g=g, f0=f0)
-        return o,f0
+            
+            print("after")
+            print(torch.sum(f0 * uv, dim=1, keepdim=True) / uv_sum)
+            print(torch.sqrt(torch.sum((f0 * uv) ** 2, dim=1, keepdim=True) / uv_sum - (torch.sum(f0 * uv, dim=1, keepdim=True) / uv_sum) ** 2))
 
+            # f0 transform
+            f0 = f0 * 2 ** (f0_tran / 12)
+            print("transform")
+            print(torch.sum(f0 * uv, dim=1, keepdim=True) / uv_sum)
+            print(torch.sqrt(torch.sum((f0 * uv) ** 2, dim=1, keepdim=True) / uv_sum - (torch.sum(f0 * uv, dim=1, keepdim=True) / uv_sum) ** 2))
+        
+        z_p, m_p, logs_p, c_mask, _ = self.enc_p(
+            x,
+            x_mask,
+            f0=(f0_to_coarse(f0) if self.use_f0 else None),
+            noice_scale=noice_scale
+        )
+        z, _ = self.flow(z_p, c_mask, g=g, reverse=True)
+        o = self.dec(z * c_mask, g=g, f0=(f0 if self.use_f0 else None))
+        return o,f0

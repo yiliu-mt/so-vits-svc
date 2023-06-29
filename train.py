@@ -144,6 +144,12 @@ def run(rank, n_gpus, hps):
         scheduler_d.step()
 
 
+def update_adversarial_weight(hps, iteration):
+    weight_iter = iteration * hps.train.adv_warmup_steps ** -1.5 * hps.model.speaker_grl_weight / hps.train.adv_warmup_steps ** -0.5
+    weight = min(hps.model.speaker_grl_weight, weight_iter)
+    return weight
+
+
 def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loaders, logger, writers):
     net_g, net_d = nets
     optim_g, optim_d = optims
@@ -154,6 +160,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
 
     # train_loader.batch_sampler.set_epoch(epoch)
     global global_step
+    CrossEntropy = nn.CrossEntropyLoss().cuda(rank)
 
     net_g.train()
     net_d.train()
@@ -175,8 +182,9 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
 
         with autocast(enabled=hps.train.fp16_run):
             y_hat, ids_slice, z_mask, \
-            (z, z_p, m_p, logs_p, m_q, logs_q), pred_lf0, norm_lf0, lf0 = net_g(c, f0, uv, spec, g=g, c_lengths=lengths,
-                                                                                spec_lengths=lengths,vol = volume)
+            (z_f, z_r, z_p, m_p, logs_p, z_q, m_q, logs_q, logdet_f, logdet_r), pred_lf0, norm_lf0, lf0, spk_preds = net_g(
+                c, f0, uv, spec, g=g, c_lengths=lengths, spec_lengths=lengths,vol=volume
+            )
 
             y_mel = commons.slice_segments(mel, ids_slice, hps.train.segment_size // hps.data.hop_length)
             y_hat_mel = mel_spectrogram_torch(
@@ -208,12 +216,28 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
             # Generator
             y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = net_d(y, y_hat)
             with autocast(enabled=False):
-                loss_mel = F.l1_loss(y_mel, y_hat_mel) * hps.train.c_mel
-                loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * hps.train.c_kl
-                loss_fm = feature_loss(fmap_r, fmap_g)
+                # speaker loss
+                if spk_preds is not None:
+                    loss_spk = CrossEntropy(spk_preds, g.squeeze(1))
+                    loss_spk *= update_adversarial_weight(hps, global_step)
+                else:
+                    loss_spk = 0
+
+                # kl loss
+                loss_kl = kl_loss(z_f, logs_q, m_p, logs_p, logdet_f, z_mask) * hps.train.c_kl
+                if z_r is not None:
+                    loss_kl += kl_loss(z_r, logs_p, m_q, logs_q, logdet_r, z_mask) * hps.train.c_kl * 0.5
+                # f0 loss
+                loss_lf0 = F.mse_loss(pred_lf0, lf0) if pred_lf0 is not None else 0
+
+                # generator loss
                 loss_gen, losses_gen = generator_loss(y_d_hat_g)
-                loss_lf0 = F.mse_loss(pred_lf0, lf0)
-                loss_gen_all = loss_gen + loss_fm + loss_mel + loss_kl + loss_lf0
+                # mel loss
+                loss_mel = F.l1_loss(y_mel, y_hat_mel) * hps.train.c_mel
+                # feature loss
+                loss_fm = feature_loss(fmap_r, fmap_g)
+                loss_gen_all = loss_gen + loss_fm + loss_mel + loss_kl + loss_lf0 + loss_spk
+
         optim_g.zero_grad()
         scaler.scale(loss_gen_all).backward()
         scaler.unscale_(optim_g)
@@ -225,6 +249,8 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
             if global_step % hps.train.log_interval == 0:
                 lr = optim_g.param_groups[0]['lr']
                 losses = [loss_disc, loss_gen, loss_fm, loss_mel, loss_kl]
+                if spk_preds is not None:
+                    losses.append(loss_spk)
                 reference_loss=0
                 for i in losses:
                     reference_loss += i
@@ -237,6 +263,8 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                                "grad_norm_d": grad_norm_d, "grad_norm_g": grad_norm_g}
                 scalar_dict.update({"loss/g/fm": loss_fm, "loss/g/mel": loss_mel, "loss/g/kl": loss_kl,
                                     "loss/g/lf0": loss_lf0})
+                if spk_preds is not None:
+                    scalar_dict.update({"loss/g/spk_preds": loss_spk})
 
                 # scalar_dict.update({"loss/g/{}".format(i): v for i, v in enumerate(losses_gen)})
                 # scalar_dict.update({"loss/d_r/{}".format(i): v for i, v in enumerate(losses_disc_r)})
@@ -245,11 +273,17 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                     "slice/mel_org": utils.plot_spectrogram_to_numpy(y_mel[0].data.cpu().numpy()),
                     "slice/mel_gen": utils.plot_spectrogram_to_numpy(y_hat_mel[0].data.cpu().numpy()),
                     "all/mel": utils.plot_spectrogram_to_numpy(mel[0].data.cpu().numpy()),
-                    "all/lf0": utils.plot_data_to_numpy(lf0[0, 0, :].cpu().numpy(),
-                                                          pred_lf0[0, 0, :].detach().cpu().numpy()),
-                    "all/norm_lf0": utils.plot_data_to_numpy(lf0[0, 0, :].cpu().numpy(),
-                                                               norm_lf0[0, 0, :].detach().cpu().numpy())
                 }
+
+                if pred_lf0 is not None:
+                    image_dict["all/lf0"] = utils.plot_data_to_numpy(
+                        lf0[0, 0, :].cpu().numpy(),
+                        pred_lf0[0, 0, :].detach().cpu().numpy()
+                    )
+                    image_dict["all/norm_lf0"] = utils.plot_data_to_numpy(
+                        lf0[0, 0, :].cpu().numpy(),
+                        norm_lf0[0, 0, :].detach().cpu().numpy()
+                    )
 
                 utils.summarize(
                     writer=writer,

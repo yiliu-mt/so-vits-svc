@@ -236,7 +236,7 @@ class Svc(object):
                    self.big_npy = feature_index.reconstruct_n(0, feature_index.ntotal)
                    self.now_spk_id = speaker_id
                 print("starting feature retrieval...")
-                score, ix = feature_index.search(feat_np, k=8)
+                score, ix = feature_index.search(feat_np.copy(), k=8)
                 weight = np.square(1 / score)
                 weight /= weight.sum(axis=1, keepdims=True)
                 npy = np.sum(self.big_npy[ix] * np.expand_dims(weight, axis=2), axis=1)
@@ -267,7 +267,10 @@ class Svc(object):
               ):
         wav, sr = librosa.load(raw_path, sr=self.target_sample)
         if spk_mix:
-            c, f0, uv = self.get_unit_f0(wav, tran, 0, None, f0_filter,f0_predictor,cr_threshold=cr_threshold)
+            c, f0, uv = self.get_unit_f0(
+                wav,
+                0 if auto_predict_f0 else tran,
+                0, None, f0_filter,f0_predictor,cr_threshold=cr_threshold)
             n_frames = f0.size(1)
             sid = speaker[:, frame:frame+n_frames].transpose(0,1)
         else:
@@ -278,7 +281,10 @@ class Svc(object):
             if speaker_id is None:
                 raise RuntimeError("The name you entered is not in the speaker list!")
             sid = torch.LongTensor([int(speaker_id)]).to(self.dev).unsqueeze(0)
-            c, f0, uv = self.get_unit_f0(wav, tran, cluster_infer_ratio, speaker, f0_filter,f0_predictor,cr_threshold=cr_threshold)
+            c, f0, uv = self.get_unit_f0(
+                wav,
+                0 if auto_predict_f0 else tran,
+                cluster_infer_ratio, speaker, f0_filter,f0_predictor,cr_threshold=cr_threshold)
             n_frames = f0.size(1)
         if "half" in self.net_g_path and torch.cuda.is_available():
             c = c.half()
@@ -287,7 +293,11 @@ class Svc(object):
             vol = None
             if not self.only_diffusion:
                 vol = self.volume_extractor.extract(torch.FloatTensor(wav).to(self.dev)[None,:])[None,:].to(self.dev) if self.vol_embedding else None
-                audio,f0 = self.net_g_ms.infer(c, f0=f0, g=sid, uv=uv, predict_f0=auto_predict_f0, noice_scale=noice_scale,vol=vol)
+                audio,f0 = self.net_g_ms.infer(
+                    c, f0=f0, g=sid, uv=uv,
+                    predict_f0=auto_predict_f0, noice_scale=noice_scale,vol=vol,
+                    f0_tran=(tran if auto_predict_f0 else 0)
+                )
                 audio = audio[0,0].data.float()
                 audio_mel = self.vocoder.extract(audio[None,:],self.target_sample) if self.shallow_diffusion else None
             else:
