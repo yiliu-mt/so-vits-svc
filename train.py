@@ -227,7 +227,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                 loss_kl = kl_loss(z_f, logs_q, m_p, logs_p, logdet_f, z_mask) * hps.train.c_kl
                 if z_r is not None:
                     assert hps.model.bidirectional_flow_weight > 0
-                    loss_kl_reverse = kl_loss(z_r, logs_p, m_q, logs_q, logdet_r, z_mask) * hps.train.c_kl * hps.model.bidirection_flow_weight
+                    loss_kl_reverse = kl_loss(z_r, logs_p, m_q, logs_q, logdet_r, z_mask) * hps.train.c_kl * hps.model.bidirectional_flow_weight
                     loss_kl += loss_kl_reverse
                 # f0 loss
                 loss_lf0 = F.mse_loss(pred_lf0, lf0) if pred_lf0 is not None else 0
