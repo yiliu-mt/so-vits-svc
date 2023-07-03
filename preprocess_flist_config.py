@@ -31,7 +31,7 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=str, default="./filelists", help="path to configs dir")
     parser.add_argument("--vol_aug", default=False, type=lambda x: (str(x).lower() == 'true'), help="Whether to use volume embedding and volume augmentation")
     parser.add_argument("--use_f0", default=True, type=lambda x: (str(x).lower() == 'true'), help="Whether to use F0 in the model")
-    parser.add_argument("--bidirectional_flow", default=False, type=lambda x: (str(x).lower() == 'true'), help="Whether to use bi-directional prior/posterior flow")
+    parser.add_argument("--bidirectional_flow_weight", default=0, type=float, help="The weight of bi-directional prior/posterior flow")
     parser.add_argument("--speaker_grl_weight", default=0, type=float, help="The weight of speaker GRL loss")
     parser.add_argument("--ppg_std", default=0, type=float, help="The stddev of PPG perturbation. Disabled when 0")
     parser.add_argument("--vae_std", default=0, type=float, help="The stddev of latent variable perturbation in VAE. Disabled when 0")
@@ -120,7 +120,7 @@ if __name__ == "__main__":
     if args.vol_aug:
         config_template["train"]["vol_aug"] = config_template["model"]["vol_embedding"] = True
     
-    config_template["model"]["bidirectional_flow"] = args.bidirectional_flow
+    config_template["model"]["bidirectional_flow_weight"] = args.bidirectional_flow_weight
     config_template["model"]["use_f0"] = args.use_f0
     config_template["model"]["speaker_grl_weight"] = args.speaker_grl_weight
     config_template["model"]["ppg_std"] = args.ppg_std

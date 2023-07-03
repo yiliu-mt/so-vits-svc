@@ -61,7 +61,7 @@
     "speaker_embedding":false,
     "vol_embedding":false,
     "vocoder_name":"nsf-hifigan",
-    "bidirectional_flow": false,
+    "bidirectional_flow_weight": 0,
     "use_f0": true,
     "speaker_grl_weight": 0,
     "ppg_std": 0,
