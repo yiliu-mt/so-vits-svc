@@ -1,0 +1,11 @@
+title: 'MT VC'
+description: |
+  So-VITS-SVC demo
+
+article: |
+  如果有任何问题，请联系 yi.liu@mthreads.com (刘艺), meng.cai@mthreads.com (蔡猛), guang.liang@mthreads.com (梁光)
+
+example_inputs:
+  - ./gradio/examples/001.wav
+  - ./gradio/examples/002.wav
+
