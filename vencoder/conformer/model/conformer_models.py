@@ -195,6 +195,52 @@ class Conv2dSubsampling4(BaseSubsampling):
         return x, pos_emb, x_mask[:, :, :-2:2][:, :, :-2:2]
 
 
+class LinearNoSubsampling(BaseSubsampling):
+    """Linear transform the input without subsampling
+
+    Args:
+        idim (int): Input dimension.
+        odim (int): Output dimension.
+        dropout_rate (float): Dropout rate.
+
+    """
+    def __init__(self, idim: int, odim: int, dropout_rate: float,
+                 pos_enc_class: torch.nn.Module):
+        """Construct an linear object."""
+        super().__init__()
+        self.out = torch.nn.Sequential(
+            torch.nn.Linear(idim, odim),
+            torch.nn.LayerNorm(odim, eps=1e-5),
+            torch.nn.Dropout(dropout_rate),
+        )
+        self.pos_enc = pos_enc_class
+        self.right_context = 0
+        self.subsampling_rate = 1
+
+    def forward(
+            self,
+            x: torch.Tensor,
+            x_mask: torch.Tensor,
+            offset: Union[int, torch.Tensor] = 0
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Input x.
+
+        Args:
+            x (torch.Tensor): Input tensor (#batch, time, idim).
+            x_mask (torch.Tensor): Input mask (#batch, 1, time).
+
+        Returns:
+            torch.Tensor: linear input tensor (#batch, time', odim),
+                where time' = time .
+            torch.Tensor: linear input mask (#batch, 1, time'),
+                where time' = time .
+
+        """
+        x = self.out(x)
+        x, pos_emb = self.pos_enc(x, offset)
+        return x, pos_emb, x_mask
+
+
 class MultiHeadedAttention(nn.Module):
     """Multi-Head Attention layer.
 
@@ -846,7 +892,10 @@ class BaseEncoder(torch.nn.Module):
         self._output_size = output_size
 
         pos_enc_class = RelPositionalEncoding
-        subsampling_class = Conv2dSubsampling4
+        if input_layer == "linear":
+            subsampling_class = LinearNoSubsampling
+        elif input_layer == "conv2d":
+            subsampling_class = Conv2dSubsampling4
 
         self.global_cmvn = global_cmvn
         self.embed = subsampling_class(

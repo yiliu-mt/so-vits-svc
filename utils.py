@@ -147,6 +147,9 @@ def get_speech_encoder(speech_encoder,device=None,**kargs):
     elif speech_encoder == "conformer-ppg-large":
         from vencoder.ConformerPPGLarge import ConformerPPGLarge
         speech_encoder_object = ConformerPPGLarge(device = device)
+    elif speech_encoder == "conformer-ppg-large512l8":
+        from vencoder.ConformerPPGLarge512L8 import ConformerPPGLarge
+        speech_encoder_object = ConformerPPGLarge(device = device)
     else:
         raise Exception("Unknown speech encoder")
     return speech_encoder_object 
