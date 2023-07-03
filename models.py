@@ -326,7 +326,7 @@ class SynthesizerTrn(nn.Module):
                  sampling_rate=44100,
                  vol_embedding=False,
                  vocoder_name="nsf-hifigan",
-                 bidirectional_flow=False,
+                 bidirectional_flow_weight=0,
                  speaker_grl_weight=0,
                  use_f0=True,
                  ppg_std=0,
@@ -352,7 +352,7 @@ class SynthesizerTrn(nn.Module):
         self.gin_channels = gin_channels
         self.ssl_dim = ssl_dim
         self.vol_embedding = vol_embedding
-        self.bidirectional_flow = bidirectional_flow
+        self.bidirectional_flow_weight = bidirectional_flow_weight
         self.use_f0 = use_f0
         self.ppg_std = ppg_std
         self.vae_std = vae_std
@@ -489,7 +489,7 @@ class SynthesizerTrn(nn.Module):
         # forward flow
         z_f, logdet_f = self.flow(z_q, spec_mask, g=g)
 
-        if self.bidirectional_flow:
+        if self.bidirectional_flow_weight > 0:
             # backward flow
             z_r, logdet_r = self.flow(z_p, spec_mask, g=g, reverse=True)
         else:

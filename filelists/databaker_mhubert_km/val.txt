@@ -1,2 +1,0 @@
-dataset/44k/databaker_mhubert_km/SSB3000/009100.wav
-dataset/44k/databaker_mhubert_km/SSB3000/000126.wav

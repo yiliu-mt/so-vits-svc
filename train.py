@@ -226,7 +226,9 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                 # kl loss
                 loss_kl = kl_loss(z_f, logs_q, m_p, logs_p, logdet_f, z_mask) * hps.train.c_kl
                 if z_r is not None:
-                    loss_kl += kl_loss(z_r, logs_p, m_q, logs_q, logdet_r, z_mask) * hps.train.c_kl * 0.5
+                    assert hps.model.bidirectional_flow_weight > 0
+                    loss_kl_reverse = kl_loss(z_r, logs_p, m_q, logs_q, logdet_r, z_mask) * hps.train.c_kl * hps.model.bidirection_flow_weight
+                    loss_kl += loss_kl_reverse
                 # f0 loss
                 loss_lf0 = F.mse_loss(pred_lf0, lf0) if pred_lf0 is not None else 0
 
@@ -265,6 +267,8 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                                     "loss/g/lf0": loss_lf0})
                 if spk_preds is not None:
                     scalar_dict.update({"loss/g/spk_preds": loss_spk})
+                if z_r is not None:
+                    scalar_dict.update({"loss/g/kl_reverse": loss_kl_reverse})
 
                 # scalar_dict.update({"loss/g/{}".format(i): v for i, v in enumerate(losses_gen)})
                 # scalar_dict.update({"loss/d_r/{}".format(i): v for i, v in enumerate(losses_disc_r)})
