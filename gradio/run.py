@@ -92,13 +92,14 @@ class GradioInfer:
 
         warmup_svc(self.svc_model, kwarg)
  
-    def greet(self, speaker_id, f_pitch_change, output_sample, audio, raw_infer=True, format='wav'):
+    def greet(self, speaker_id, f_pitch_change, auto_predict_f0, output_sample, audio, raw_infer=True, format='wav'):
 
         svc_model = self.svc_model
         input_wav_path = prepare_input_wav_in_mem(audio)
         trans = float(f_pitch_change)
         output_sample = int(output_sample)
         kwarg = self.kwarg.copy()
+        kwarg['auto_predict_f0'] = auto_predict_f0
 
         # 模型推理
         if raw_infer:
@@ -125,19 +126,38 @@ class GradioInfer:
 
     def run(self):
         examples = [
-                ['SSB3000', 0, '44100', self.example_inputs[0]],
-                ['SSB3000', 1.0, '16000', self.example_inputs[1]],
+                ['SSB3000', 0, True, '44100', self.example_inputs[0]],
+                ['SSB3000', 1.0, True, '16000', self.example_inputs[1]],
                 ]
         speaker_ids = self.speaker_ids
         output_sample = self.svc_model.target_sample
         sample_choices = list(map(str, [16000, 24000, 44100, 48000]))
-        iface = gr.Interface(fn=self.greet,
+        microphone_input = gr.components.Audio(source='microphone', type='numpy', label='Microphone')
+        audio_file_input = gr.components.Audio(source='upload', type='numpy', label='Upload Audio')
+        vc_rec = gr.Interface(fn=self.greet,
                              inputs=[
-                                gr.components.Dropdown(choices=speaker_ids, value='SSB3000', label="Target speaker id"),
-                                gr.components.Textbox(lines=1, value=0.0, label="F0 音高调整，支持正负（半音）"),
+                                gr.components.Dropdown(choices=speaker_ids, value='SSB3000', label="target speaker id"),
+                                gr.components.Number(value=0, label="f0 音高调整，支持正负（半音）"),
+                                gr.components.Checkbox(value=True, label="auto_predict_f0", info="自动预测 Pitch？(推荐说话启用，唱歌可以不需要)"),
                                 gr.components.Dropdown(choices=sample_choices, value=sample_choices[2], label="output_sample"),
-                                gr.components.Audio(source="upload", label="Input audio"),
-                                # gr.components.Audio(source="microphone", label="Input audio"),
+                                microphone_input,
+                             ],
+                             outputs=gr.components.Audio(),
+                             allow_flagging="never",
+                             title=self.title,
+                             description=self.description,
+                             article=self.article,
+                             # examples=examples,
+                             # examples_per_page=5,
+                             )
+        vc_file = gr.Interface(
+                fn=self.greet,
+                             inputs=[
+                                gr.components.Dropdown(choices=speaker_ids, value='SSB3000', label="target speaker id"),
+                                gr.components.Number(value=0, label="f0 音高调整，支持正负（半音）"),
+                                gr.components.Checkbox(value=True, label="auto_predict_f0", info="自动预测 Pitch？(推荐说话启用，唱歌可以不需要)"),
+                                gr.components.Dropdown(choices=sample_choices, value=sample_choices[2], label="output_sample"),
+                                audio_file_input,
                              ],
                              outputs=gr.components.Audio(),
                              allow_flagging="never",
@@ -147,7 +167,11 @@ class GradioInfer:
                              examples=examples,
                              examples_per_page=5,
                              )
-        iface.launch(share=False, server_port=self.port, server_name="0.0.0.0", enable_queue=True)
+        iface = gr.TabbedInterface([vc_file, vc_rec], ['VC from File', 'VC from Microphone'])
+        # # 定义 SSL 证书和私钥文件路径
+        # ssl_certificate = 'gradio/keys/certificate.pem'
+        # ssl_private_key = 'gradio/keys/private_key.pem'
+        iface.launch(share=False, server_port=self.port, server_name="0.0.0.0", enable_queue=True)  # , ssl_cert=ssl_certificate, ssl_key=ssl_private_key)
 
 
 if __name__ == '__main__':

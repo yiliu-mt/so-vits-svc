@@ -5,6 +5,7 @@ PYTHONPATH=. CUDA_VISIBLE_DEVICES=4 \
   python gradio/run.py \
     --config /nfs1/yi.liu/src/so-vits-svc/logs/ljspeech_vctk_databaker_aishell3_mita_musha_jams_others_0607_contentvec/config.json \
     --model /nfs1/yi.liu/src/so-vits-svc/logs/ljspeech_vctk_databaker_aishell3_mita_musha_jams_others_0607_contentvec/G_400000.pth \
+    --slice_db -40 \
     -f0p dio \
     -a \
     -lg 1 \
