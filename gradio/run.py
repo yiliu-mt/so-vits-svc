@@ -168,10 +168,7 @@ class GradioInfer:
                              examples_per_page=5,
                              )
         iface = gr.TabbedInterface([vc_file, vc_rec], ['VC from File', 'VC from Microphone'])
-        # # 定义 SSL 证书和私钥文件路径
-        # ssl_certificate = 'gradio/keys/certificate.pem'
-        # ssl_private_key = 'gradio/keys/private_key.pem'
-        iface.launch(share=False, server_port=self.port, server_name="0.0.0.0", enable_queue=True)  # , ssl_cert=ssl_certificate, ssl_key=ssl_private_key)
+        iface.launch(share=False, server_port=self.port, server_name="0.0.0.0", enable_queue=True)
 
 
 if __name__ == '__main__':
